@@ -354,6 +354,16 @@ def fmt_mg(v):
 @lru_cache(maxsize=256)
 def _fetch_products_raw(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
     """식약처 API 조회(이름 그대로). 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
+    if "/" in name:
+        # 식약처 API는 경로 안의 '/'(%2F 포함)를 처리하지 못해 404가 난다.
+        # '/' 없는 가장 긴 조각으로 검색한 뒤, 전체 이름(공백 무시)이 들어 있는 제품만 남긴다.
+        seg = max(name.split("/"), key=lambda x: len(x.strip())).strip()
+        if not seg:
+            return ()
+        rows = _fetch_products_raw(seg, max(limit, 50), service_id)
+        want = re.sub(r"\s+", "", name)
+        hit = tuple(r for r in rows if want in re.sub(r"\s+", "", r.get("PRDLST_NM", "")))
+        return hit[:limit]
     enc = urllib.parse.quote(name, safe="")
     url = f"{BASE_URL}/{API_KEY}/{service_id}/{DATA_TYPE}/1/{limit}/PRDLST_NM={enc}"
     try:
