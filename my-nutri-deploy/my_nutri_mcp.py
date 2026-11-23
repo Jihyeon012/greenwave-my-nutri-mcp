@@ -354,7 +354,7 @@ def fmt_mg(v):
 @lru_cache(maxsize=256)
 def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
     """식약처 API 조회. 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
-    enc = urllib.parse.quote(name)
+    enc = urllib.parse.quote(name, safe="")
     url = f"{BASE_URL}/{API_KEY}/{service_id}/{DATA_TYPE}/1/{limit}/PRDLST_NM={enc}"
     try:
         res = requests.get(url, timeout=TIMEOUT)
