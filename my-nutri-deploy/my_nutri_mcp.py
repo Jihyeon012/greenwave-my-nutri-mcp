@@ -352,8 +352,8 @@ def fmt_mg(v):
 # 제품 조회 (C003 검색 / I0030 상세)
 # =====================================================================
 @lru_cache(maxsize=256)
-def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
-    """식약처 API 조회. 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
+def _fetch_products_raw(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
+    """식약처 API 조회(이름 그대로). 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
     enc = urllib.parse.quote(name, safe="")
     url = f"{BASE_URL}/{API_KEY}/{service_id}/{DATA_TYPE}/1/{limit}/PRDLST_NM={enc}"
     try:
@@ -375,12 +375,28 @@ def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> 
     return tuple(service.get("row", []))
 
 
+def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
+    """띄어쓰기가 달라도 찾도록: 입력 그대로 조회 -> 결과가 없으면 공백을 모두 뺀 이름으로 한 번 더 조회."""
+    rows = _fetch_products_raw(name, limit, service_id)
+    if not rows:
+        compact = re.sub(r"\s+", "", name or "")
+        if compact and compact != name:
+            rows = _fetch_products_raw(compact, limit, service_id)
+    return rows
+
+
+def _nospace(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
 def pick_product(name: str):
     """이름이 정확히 일치하는 제품을 우선 선택, 없으면 첫 번째 후보. (선택된 제품, 전체 후보)"""
     rows = fetch_products(name.strip())
     if not rows:
         return None, ()
     exact = [r for r in rows if r.get("PRDLST_NM", "").strip() == name.strip()]
+    if not exact:  # 띄어쓰기만 다른 경우도 정확 일치로 본다
+        exact = [r for r in rows if _nospace(r.get("PRDLST_NM", "")) == _nospace(name)]
     return (exact[0] if exact else rows[0]), rows
 
 
