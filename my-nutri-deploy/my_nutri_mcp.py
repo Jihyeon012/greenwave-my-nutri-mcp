@@ -781,7 +781,7 @@ def analyze_daily_intake(product_names_str: str, sex: str = "", age: int = 0) ->
     목록 중 누락되거나 찾을 수 없는 제품이 있으면 개별적으로 피드백을 제공합니다."""
     # 쉼표, 슬래시, +, 줄바꿈 모두 구분자로 허용. 이름 끝의 'x2' / '×2' 는 하루 섭취 단위 수로 해석
     names, units_by_name = [], {}
-    for n in (x.strip() for x in re.split(r"[,\n/+]", product_names_str)):
+    for n in (x.strip() for x in re.split(r"[,\n;]|\s+[/+]\s+", product_names_str)):
         if not n:
             continue
         m = re.search(r"\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", n, re.I)
@@ -1487,7 +1487,7 @@ def _caution_text(item: dict) -> str:
 
 def _caution_report(title: str, names_str: str, terms_str: str, table: dict, alias: dict, term_label: str,
                     always_targets: dict = None) -> str:
-    names = [n.strip() for n in re.split(r"[,\n/+]", names_str or "") if n.strip()]
+    names = [n.strip() for n in re.split(r"[,\n;]|\s+[/+]\s+", names_str or "") if n.strip()]
     if not names:
         return "제품명을 쉼표로 구분해 입력해 주세요."
     groups, literals = _resolve_terms(terms_str, table, alias)
@@ -1803,7 +1803,7 @@ _LEVEL_ICON = {"red": "🔴", "yellow": "🟡", "info": "ℹ️", "green": "🟢
 
 def _parse_product_names(product_names_str: str):
     names, units = [], {}
-    for n in (x.strip() for x in re.split(r"[,\n/+]", product_names_str or "")):
+    for n in (x.strip() for x in re.split(r"[,\n;]|\s+[/+]\s+", product_names_str or "")):
         if not n:
             continue
         m = re.search(r"\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", n, re.I)
