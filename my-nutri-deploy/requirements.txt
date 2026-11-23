@@ -1,0 +1,6 @@
+fastmcp>=2.12,<4
+requests>=2.31
+uvicorn>=0.30
+fastapi>=0.110
+pydantic>=2
+anthropic>=0.75

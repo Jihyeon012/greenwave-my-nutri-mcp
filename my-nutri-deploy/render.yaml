@@ -1,0 +1,43 @@
+# Render Blueprint: 서비스 2개 (MCP 서버 / 웹사이트). 비밀 값은 대시보드에서 직접 입력합니다(sync: false).
+services:
+  - type: web
+    name: my-nutri-mcp
+    runtime: python
+    plan: starter            # free 는 15분 무요청 시 잠들어 첫 응답이 느립니다. 시연·심사 기간에는 starter 권장
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server_http:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: FASTMCP_STATELESS_HTTP
+        value: "true"
+      - key: MFDS_API_KEY
+        sync: false
+      - key: DATA_GO_KR_KEY
+        sync: false
+      - key: MCP_AUTH_TOKEN
+        sync: false
+
+  - type: web
+    name: my-nutri-web
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MCP_URL            # 예: https://my-nutri-mcp.onrender.com/mcp
+        sync: false
+      - key: MCP_AUTH_TOKEN     # MCP 서비스와 같은 값
+        sync: false
+      - key: WEB_MODEL
+        value: claude-sonnet-5-5
+      - key: IP_LIMIT
+        value: "8"
+      - key: DAILY_LIMIT
+        value: "300"
