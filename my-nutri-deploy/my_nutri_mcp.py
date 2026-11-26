@@ -265,7 +265,7 @@ def _nutri_tool(fn):
 
 
 # 인증키는 환경변수 MFDS_API_KEY 로 넣는 것을 권장합니다 (코드에 직접 적으면 유출 위험)
-API_KEY = os.environ.get("MFDS_API_KEY", "api 코드")
+API_KEY = os.environ.get("MFDS_API_KEY", "3dba2e8bc9244d8da38d")
 DATA_TYPE = "json"
 BASE_URL = "http://openapi.foodsafetykorea.go.kr/api"
 TIMEOUT = 15
@@ -352,19 +352,9 @@ def fmt_mg(v):
 # 제품 조회 (C003 검색 / I0030 상세)
 # =====================================================================
 @lru_cache(maxsize=256)
-def _fetch_products_raw(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
-    """식약처 API 조회(이름 그대로). 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
-    if "/" in name:
-        # 식약처 API는 경로 안의 '/'(%2F 포함)를 처리하지 못해 404가 난다.
-        # '/' 없는 가장 긴 조각으로 검색한 뒤, 전체 이름(공백 무시)이 들어 있는 제품만 남긴다.
-        seg = max(name.split("/"), key=lambda x: len(x.strip())).strip()
-        if not seg:
-            return ()
-        rows = _fetch_products_raw(seg, max(limit, 50), service_id)
-        want = re.sub(r"\s+", "", name)
-        hit = tuple(r for r in rows if want in re.sub(r"\s+", "", r.get("PRDLST_NM", "")))
-        return hit[:limit]
-    enc = urllib.parse.quote(name, safe="")
+def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
+    """식약처 API 조회. 결과 없음 -> 빈 tuple, 통신/인증 오류 -> ApiError."""
+    enc = urllib.parse.quote(name)
     url = f"{BASE_URL}/{API_KEY}/{service_id}/{DATA_TYPE}/1/{limit}/PRDLST_NM={enc}"
     try:
         res = requests.get(url, timeout=TIMEOUT)
@@ -385,28 +375,12 @@ def _fetch_products_raw(name: str, limit: int = 10, service_id: str = SERVICE_ID
     return tuple(service.get("row", []))
 
 
-def fetch_products(name: str, limit: int = 10, service_id: str = SERVICE_ID) -> tuple:
-    """띄어쓰기가 달라도 찾도록: 입력 그대로 조회 -> 결과가 없으면 공백을 모두 뺀 이름으로 한 번 더 조회."""
-    rows = _fetch_products_raw(name, limit, service_id)
-    if not rows:
-        compact = re.sub(r"\s+", "", name or "")
-        if compact and compact != name:
-            rows = _fetch_products_raw(compact, limit, service_id)
-    return rows
-
-
-def _nospace(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
-
-
 def pick_product(name: str):
     """이름이 정확히 일치하는 제품을 우선 선택, 없으면 첫 번째 후보. (선택된 제품, 전체 후보)"""
     rows = fetch_products(name.strip())
     if not rows:
         return None, ()
     exact = [r for r in rows if r.get("PRDLST_NM", "").strip() == name.strip()]
-    if not exact:  # 띄어쓰기만 다른 경우도 정확 일치로 본다
-        exact = [r for r in rows if _nospace(r.get("PRDLST_NM", "")) == _nospace(name)]
     return (exact[0] if exact else rows[0]), rows
 
 
@@ -807,7 +781,7 @@ def analyze_daily_intake(product_names_str: str, sex: str = "", age: int = 0) ->
     목록 중 누락되거나 찾을 수 없는 제품이 있으면 개별적으로 피드백을 제공합니다."""
     # 쉼표, 슬래시, +, 줄바꿈 모두 구분자로 허용. 이름 끝의 'x2' / '×2' 는 하루 섭취 단위 수로 해석
     names, units_by_name = [], {}
-    for n in (x.strip() for x in re.split(r"[,\n;]|\s+[/+]\s+", product_names_str)):
+    for n in (x.strip() for x in re.split(r"[,\n/+]", product_names_str)):
         if not n:
             continue
         m = re.search(r"\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", n, re.I)
@@ -1023,7 +997,7 @@ def check_intake_limits(intake_str: str, sex: str = "", age: int = 0) -> str:
 #    그래서 첫 호출 때 후보 이름을 차례로 시도해 서버가 필터를 적용하는 이름을 찾아 기억합니다.
 #    debug_datagokr 로 실제 응답을 확인한 뒤, 확정된 이름을 DGK_PARAM_CONFIRMED 에 적어 두세요.
 # =====================================================================
-DATA_GO_KR_KEY = os.environ.get("DATA_GO_KR_KEY", "")  # 식품안전나라 키(MFDS_API_KEY)와 별개. '일반 인증키(Decoding)'
+DATA_GO_KR_KEY = os.environ.get("DATA_GO_KR_KEY", "da28ba78106d19d1f1e7f0a30c72d58a3b900b27234dacf130d9957660fc0141")  # 식품안전나라 키(MFDS_API_KEY)와 별개. '일반 인증키(Decoding)'
 DGK_BASE = "https://apis.data.go.kr"
 DGK_SERVICES = {
     # 키 이름 -> "기관코드/서비스명/오퍼레이션"  (End Point + 상세기능)
@@ -1513,7 +1487,7 @@ def _caution_text(item: dict) -> str:
 
 def _caution_report(title: str, names_str: str, terms_str: str, table: dict, alias: dict, term_label: str,
                     always_targets: dict = None) -> str:
-    names = [n.strip() for n in re.split(r"[,\n;]|\s+[/+]\s+", names_str or "") if n.strip()]
+    names = [n.strip() for n in re.split(r"[,\n/+]", names_str or "") if n.strip()]
     if not names:
         return "제품명을 쉼표로 구분해 입력해 주세요."
     groups, literals = _resolve_terms(terms_str, table, alias)
@@ -1829,7 +1803,7 @@ _LEVEL_ICON = {"red": "🔴", "yellow": "🟡", "info": "ℹ️", "green": "🟢
 
 def _parse_product_names(product_names_str: str):
     names, units = [], {}
-    for n in (x.strip() for x in re.split(r"[,\n;]|\s+[/+]\s+", product_names_str or "")):
+    for n in (x.strip() for x in re.split(r"[,\n/+]", product_names_str or "")):
         if not n:
             continue
         m = re.search(r"\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", n, re.I)
@@ -2616,28 +2590,17 @@ def _admin_level(actions: list) -> str:
     return "yellow" if actions else "green"
 
 
-# ---------------------------------------------------------------------
-# 11) 광고 팩트체크: 광고 문구를 공식 인정 기능성(I0030 주된기능성)과 대조
-#     법 위반 판정은 하지 않고 '공식 인정 내용과 다르게 읽힐 수 있다'까지만 표시합니다.
-# ---------------------------------------------------------------------
-_DISEASE_PATTERNS = [
-    ("치료·치유·완치 표현", r"치료|치유|완치|처방|약효|의약품\s*(수준|급|처럼)"),
-    ("질병 예방·치료·개선 표현", r"(암|당뇨(병)?|고혈압|치매|우울증|불면증|관절염|아토피|탈모|빈혈|통풍|골다공증|지방간|간염|염증)\s*[^.!\n]{0,10}(예방|치료|개선|완화|치유|해결|억제|차단)"),
-    ("혈압·혈당·콜레스테롤을 '낮춘다'는 단정 표현", r"(혈압|혈당|콜레스테롤|중성지방)\s*(을|를)?\s*(확실히\s*)?(낮춰|낮추|떨어뜨|내려)"),
-    ("체중·지방 감량 단정 표현", r"(\d+\s*(kg|킬로)\s*(감량|빠|뺀)|지방\s*(분해|제거|녹)|살\s*(빠|뺀))"),
-]
-_EXAGGERATION_PATTERNS = [
-    ("100%·완벽·최고 등 절대적 표현", r"100\s*%|완벽|최고|최상|기적|만병|무조건|확실히|보장|보증"),
-    ("즉시·단기간 효과 단정 표현", r"즉시|당장|하루만에|일주일\s*(만에|내)|\d+\s*일\s*만에"),
-    ("부작용 없음 표현", r"부작용\s*(이|은)?\s*(전혀\s*)?(없|제로)"),
-    ("승인·인증 표현(근거 확인 필요)", r"(FDA|식약처|식품의약품안전처)\s*(승인|인증|공인|허가)|의사\s*(추천|처방)|임상\s*(입증|증명|완료)"),
-]
 _AD_STOP = {"도움", "도움을", "필요", "유지", "기능", "건강", "작용", "개선", "대사", "있음", "도움이", "수", "에", "을", "를", "및", "또는",
             "효과", "제품", "함유", "원료", "섭취", "건강에", "건강한", "좋은", "관리", "지원", "케어"}
 
 
 def _tokens(text: str) -> set:
     return {t for t in re.findall(r"[가-힣A-Za-z0-9]{3,}", text or "") if t not in _AD_STOP}
+
+
+def _function_keys_strict(text: str) -> set:
+    """광고 점검용: 한 글자 동의어('장' 등)로 인한 오탐(예: 백내장)을 막기 위해 두 글자 이상만 사용"""
+    return {k for k, syns in FUNCTION_SYNONYMS.items() if (len(k) >= 2 and k in text) or any(len(x) >= 2 and x in text for x in syns)}
 
 
 def _function_keys(text: str) -> set:
@@ -2652,26 +2615,142 @@ def _split_ad(text: str) -> list:
 _AD_AMOUNT_RE = re.compile(r"([가-힣A-Za-z][가-힣A-Za-z0-9\- ]{0,14}?)\s*(\d[\d,]*(?:\.\d+)?)\s*(㎍|μg|µg|mcg|㎎|mg|g)(?![a-zA-Z])", re.I)
 
 
+
+# ---------------------------------------------------------------------
+# 11) 광고 팩트체크 (법령·고시·협회 심의기준 기반)
+#     근거: 식품표시광고법 제8조, 시행령 [별표 1](2023.12.26.), 식약처 고시 「식품등의 부당한 표시 또는 광고의 내용 기준」 제2조·[별표 1],
+#           한국건강기능식품협회 「건강기능식품 표시·광고 공통심의기준」(2025.6) 및 심의기준 변경 공지(2024.12.3, 2025.2.5, 2025.6.11)
+#     법 위반 판정은 하지 않고 '해당할 수 있음'과 근거만 표시합니다. 법 기준과 협회(자율심의) 기준을 구분해 보여줍니다.
+# ---------------------------------------------------------------------
+_DISEASES = (r"당뇨(병)?|고혈압|저혈압|(?<![가-힣])암(?=\s|을|를|이|에|과|도|세포|예방|치료|$)|치매|우울증|불면증|관절염|류마티스|아토피|비염|탈모|위염|역류성|"
+             r"간염|지방간|간경화|통풍|빈혈|골다공증|백내장|녹내장|황반변성|전립선\s*비대|갱년기\s*증후군|변비|비만|고지혈증|동맥경화|뇌졸중|심근경색|"
+             r"감기|독감|대상포진|생리통|ADHD|신부전")
+
+# 고시 [별표 1] 한약의 처방명 및 이와 유사명칭 (가목) + 협회 공통심의기준 Ⅱ-1 제품명 금지 예시
+_HANBANG_NAMES = [
+    "공진단", "공신단", "공심환", "공보환", "공지환", "공침환", "공본환", "경옥고", "정옥고", "익수영진고", "익수영진경옥고차환",
+    "사군자탕", "사군자전", "사군자환", "사물탕", "사물전", "사물환", "사물액", "쌍화탕", "쌍화전", "한방쌍화차", "쌍화액",
+    "십전대보탕", "십전대보전", "십전대보액", "십전대보원", "십전대보초", "십전대보진", "대보초", "대보환", "대보단",
+    "녹용대보탕", "녹용대보전", "녹용대보액", "녹용대보즙", "녹용기력대보", "녹용대보진액", "녹용대보정", "녹용대보초", "녹용대보원", "녹용대보환",
+    "보아탕", "총명탕", "총명전", "총명차", "총명환", "총명대보중탕", "총기차", "총명액", "총기원", "더총명", "총명단",
+    "귀비탕", "귀비전", "귀비차", "귀비액", "육미지황", "육미골드", "팔미지황", "팔물전전", "고본환", "고본단", "인삼고본", "고본주", "고본술", "고본액",
+    "고본건양단", "궁귀교애", "궁귀초", "소체환", "속편환", "육군자탕", "육군자전", "오적산", "생맥산", "생맥차", "익모환", "진해고", "명목환",
+    "청심원", "청심환", "귤피탕", "맥문동탕", "팔물탕", "팔물진탕", "이중탕", "인삼탕", "연년익수불로단", "오자원", "오자연종환", "귀룡탕", "귀용탕",
+    "성장환", "생치원", "제통원", "정기산", "혈기원", "신기원", "천보환", "청패원", "청패액", "은교산", "성장액",
+]
+_HANBANG_RE = "|".join(sorted(map(re.escape, _HANBANG_NAMES), key=len, reverse=True)) + r"|(?:공진|공신|경옥)[가-힣]{0,3}"
+
+LAW, KHFF = "법", "협회"
+# (구분, 근거, 유형, 등급, 감지 패턴, 문장 예외 패턴, 예외 설명)
+AD_RULES = [
+    (LAW, "법 제8조①1호·별표1 1호", "질병 예방·치료 표현", "bad",
+     r"치료|완치|치유|낫(는|게|아|습)|나았|고쳐|고친|근본\s*해결", None, ""),
+    (LAW, "법 제8조①1호·별표1 1호", "질병명과 효과를 연결한 표현", "bad",
+     rf"({_DISEASES})\s*[^.!?\n]{{0,12}}(예방|개선|완화|해결|억제|차단|극복|잡아|효과|에\s*좋|탈출|걱정\s*끝)", r"발생\s*위험\s*감소",
+     "질병발생 위험 감소로 인정받은 표현은 예외(별표1 1호 라-1)"),
+    (LAW, "법 제8조①2호·별표1 2호", "의약품으로 오인될 수 있는 표현", "bad",
+     r"처방|약효|치료제|의약품\s*(수준|급|처럼|성분|대신)|약\s*대신|주사\s*대신|약을\s*끊|약\s*없이|천연\s*[가-힣]{0,4}약(?![가-힣])|"
+     r"먹는\s*[가-힣A-Za-z]{0,6}(약|주사)(?![가-힣])|식욕\s*억제제|위고비|마운자로|삭센다|비아그라|시알리스|GLP-?1", None, ""),
+    (LAW, "고시 제2조 1호·고시 [별표 1]", "한약 처방명·유사 명칭", "bad", _HANBANG_RE, None, ""),
+    (LAW, "법 제8조①4호·별표1 4호", "거짓·과장 가능 표현", "warn",
+     r"100\s*%|완벽|기적|만병|특효|무조건|확실히|보장|보증|평생|영구|즉시|당장|단번에|하루\s*만에|\d+\s*일\s*만에|일주일\s*(만에|내)|"
+     r"부작용\s*(이|은)?\s*(전혀\s*)?(없|제로)", r"100\s*%\s*(원료|함량|국내산|함유|천연)|(함량|원료)\s*100\s*%", "원료·함량을 설명하는 100%는 참고로만 봄"),
+    (LAW, "법 제8조①4호·별표1 4호", "감량 효과 단정 표현", "warn",
+     r"\d+\s*(kg|킬로)\s*(감량|빠|뺀|줄)|지방\s*(분해|제거|녹|태우)|살\s*(빠|뺀|빼)|체지방\s*\d+\s*%", r"인체|임상|시험",
+     "인체시험 결과 인용은 참고로만 봄(아래 인체시험 기준 확인)"),
+    (LAW, "법 제8조①4호·별표1 4호 마", "승인·인증을 사실과 다르게 쓸 수 있는 표현", "warn",
+     r"(FDA|식약처|식품의약품안전처)\s*(승인|허가)|임상\s*(입증|증명)|노벨상", None, ""),
+    (LAW, "법 제8조①5호·별표1 5호 다·라", "체험기·전문가 추천 표현", "warn",
+     r"체험(기|담)|감사장|한방|특수\s*제법|주문\s*쇄도|단체\s*추천|(의사|치과의사|한의사|약사|한약사|교수|박사|전문의|영양사)[가-힣\s]{0,6}(추천|보증|공인|극찬)",
+     r"연구|개발|공동\s*개발|참여", "의사 등이 연구·개발에 직접 참여한 사실만 밝히면 예외(별표1 5호 라 단서)"),
+    (LAW, "별표1 5호 차·고시 제2조 3호 차·파", "근거가 불분명한 용어", "ref",
+     r"이온수|생명수|약수|슈퍼\s*푸드|superfood|당지수|저\s*GI|천연|자연|natural", None, ""),
+    (LAW, "고시 제2조 3호·5호", "무첨가·free 강조", "ref",
+     r"무첨가|무방부제|무\s*MSG|MSG\s*무첨가|무보존료|보존료\s*무첨가|[A-Za-z가-힣]+\s*[- ]?free(?![a-z])|무설탕|무가당|Non-?GMO|GMO-?free|"
+     r"(화학|합성)\s*첨가물\s*(0|없|제로)", None, "사용 가능한 첨가물을 쓰지 않고 함유도 안 된 경우 등은 허용(고시 제2조 5호 단서)"),
+    (LAW, "법 제8조①6호·별표1 6호·고시 제2조 4호 가", "다른 제품 비방", "warn",
+     r"다른\s*[가-힣A-Za-z]{0,6}(와|과)\s*달리|타사|경쟁사|시중\s*(제품|의|에)|저가\s*제품|싸구려|가짜\s*[가-힣]{0,4}(제품|영양제)", None, ""),
+    (LAW, "법 제8조①7호·별표1 7호·고시 제2조 4호 나", "근거 없는 비교·최고 표현", "warn",
+     r"더\s*(안전|우수|효과적)|(?<![\d.])1\s*위|넘버\s*원|No\.?\s*1(?!\d)|업계\s*(최고|최초|유일)|국내\s*최초|세계\s*최초|최초|유일|\d+\s*배\s*(효과|흡수|더|높)|흡수율\s*\d+\s*배|최고|최상",
+     r"조사|출처|기준|\d{4}\s*년|닐슨|칸타|한국갤럽|리서치", "조사대상·기관·기간을 밝힌 순위는 참고로만 봄"),
+    (LAW, "법 제8조①8호·별표1 8호", "사행심 조장 가능 표현", "ref", r"복권|로또|화투|추첨|경품", None, ""),
+    (KHFF, "공통심의기준 Ⅱ-1", "의약품·질병을 연상시키는 명칭", "warn", r"동의보감|메디컬|클리닉|홀몬|호르몬\s*파워", None, ""),
+    (KHFF, "공통심의기준 Ⅱ-1", "인정 기능성을 벗어난 연상 표현", "warn",
+     r"디톡스|다이톡스|해독|스터디\s*파워|브레인|BRAIN|I-?Q\s*UP|Bone\s*Guard|숙면\s*다이어트|자기\s*전에\s*먹는\s*다이어트", None, ""),
+    (KHFF, "공통심의기준 Ⅱ-1·Ⅴ-2", "특정 계층에 특화된 것처럼 보이는 표현", "warn", r"수험생|고3|수능|당뇨\s*환자|환자용|공시\s*준비", None, ""),
+    (KHFF, "심의기준 변경 공지(2025)", "공부·학습능력과 연결될 수 있는 표현", "warn",
+     r"공부|학습|학교|학원|성적|집중력\s*(향상|업)", r"지친|지쳐|힘든|체력|피곤", "'공부하느라 지친', '공부체력'처럼 체력 문맥은 허용"),
+    (KHFF, "심의기준 변경 공지(2025)", "기능성을 왜곡하는 부스터 표현", "warn",
+     r"(근육|늦둥이|정력|남성|성기능)\s*[가-힣]{0,3}\s*부스(트|터)", None, "'에너지 부스터', '생기 부스터'는 허용"),
+    (KHFF, "공통심의기준 Ⅲ-2-나·변경 공지(2025)", "특허 표현", "warn", r"국제\s*특허|PCT|특허\s*출원|출원\s*중", None,
+     "'미국특허', '해외특허(미국)'처럼 해당 국가를 밝힌 등록 특허는 허용"),
+    (KHFF, "공통심의기준 Ⅲ-2-가", "시험관·동물실험 결과를 수치로 쓴 표현", "warn",
+     r"(시험관|동물)\s*실험[^.!?\n]{0,30}\d+(\.\d+)?\s*(%|배)", None, ""),
+    (KHFF, "공통심의기준 Ⅴ-2 사례", "효과를 보장하는 체험·성기능 암시 표현", "warn",
+     r"쎄다|강한\s*놈|정력|밤이\s*(달라|즐거)|아내가\s*좋|1일\s*1\s*(응가|변)|먹고\s*[가-힣 ]{0,8}(빠졌|나았|좋아졌|사라졌|줄었)", None, ""),
+    (KHFF, "공통심의기준 Ⅴ-2 사례", "기능성 범위를 벗어난 다이어트 연상 표현", "warn",
+     r"혈당\s*스파이크|식탐|입터짐|안\s*찌는\s*체질|혈당\s*관리로\s*(성공|다이어트|살)|빠지(네요|더라|더니)|빠졌(어요|다|네)", None, ""),
+    (KHFF, "공통심의기준 Ⅴ-1 사례", "인정 기능성을 넘어선 단정 표현", "warn", r"(면역력?|기억력|체력|활력)\s*(강화|폭발|극대화|완성)", None,
+     "인정 문구 예: '면역력 증진에 도움을 줄 수 있음'"),
+]
+_AD_RULES_C = [(g, b, t, lv, re.compile(p, re.I), re.compile(e, re.I) if e else None, note) for g, b, t, lv, p, e, note in AD_RULES]
+
+_HEALTHFOOD_CLAIM_RE = re.compile(r"건강기능식품|기능성\s*(인정|원료)|식약처\s*(인정|인증)|개별\s*인정")
+_STRONG_CLAIM_RE = re.compile(r"해결|회복|되찾|되살|완성|강화(합|해|시)|책임(집|져)|싹|말끔|개선(합니다|됩니다|해\s*줍|시켜|돼요)|좋아(집|져)")
+_HUMAN_TRIAL_RE = re.compile(r"인체\s*(적용)?\s*시험|임상")
+_NUMBER_CLAIM_RE = re.compile(r"\d+(\.\d+)?\s*(%|kg|배)")
+_DISCLAIM_HEALTHINFO = re.compile(r"제품(정보)?(과|와)\s*(직접적인\s*)?관련(이)?\s*없")
+_AD_LEVEL_ORDER = {"bad": 3, "warn": 2, "ok": 1, "ref": 0, "info": 0}
+_AD_LEVEL_MARK = {"bad": "❌", "warn": "⚠️", "ok": "✅", "ref": "ℹ️", "info": "ℹ️"}
+
+
+def _ad_rule_hits(sentence: str, whole: str) -> list:
+    hits = []
+    disclaim = bool(_DISCLAIM_HEALTHINFO.search(whole))
+    for group, basis, label, level, rx, exc, note in _AD_RULES_C:
+        m = rx.search(sentence)
+        if not m:
+            continue
+        lv = level
+        if exc and not exc.search(sentence) and label not in ("공부·학습능력과 연결될 수 있는 표현", "근거 없는 비교·최고 표현"):
+            note = ""
+        if exc and exc.search(sentence):
+            if label in ("질병명과 효과를 연결한 표현", "체험기·전문가 추천 표현", "공부·학습능력과 연결될 수 있는 표현"):
+                continue                      # 예외 문맥이면 표시하지 않음
+            lv = "ref"                        # 그 밖의 예외 문맥은 참고로 낮춤
+        if label == "질병명과 효과를 연결한 표현" and disclaim:
+            lv = "ref"
+            note = "광고에 '제품과 직접적인 관련이 없다'는 안내가 있어 참고로 낮춤(별표1 1호 라-2)"
+        hits.append({"group": group, "basis": basis, "label": label, "level": lv, "match": m.group(0).strip(), "note": note})
+    return hits
+
+
 @_nutri_tool
-def check_ad_claims(ad_text: str, product_name: str = "") -> str:
-    """상세페이지·광고 문구를 붙여 넣으면 식약처 공식 인정 기능성과 대조해 문장별로
-    ✅ 인정 범위 / ⚠️ 인정 범위 밖·과장 가능 / ❌ 질병 치료·예방처럼 읽히는 표현 으로 표시합니다.
-    product_name 을 주면 그 제품의 인정 기능성·함량(기준규격)과 비교하고, 비우면 질병·과장 표현만 점검합니다.
-    ⚠️ 법 위반 판정이 아니라 '공식 인정 내용과 다르게 읽힐 수 있는 표현'을 알려 주는 참고 기능입니다. 결과 끝의 ```json 블록은 카드용 데이터입니다.
+def check_ad_claims(ad_text: str, product_name: str = "", source_url: str = "", collected_at: str = "") -> str:
+    """광고·상세페이지 문구를 문장별로 점검합니다. 법령(식품표시광고법 제8조, 시행령 별표1, 식약처 고시)과
+    한국건강기능식품협회 공통심의기준(2025.6)의 금지 유형에 '해당할 수 있는' 표현을 근거 조항과 함께 표시하고,
+    product_name 을 주면 식약처 공식 인정 기능성·함량(I0030)과 건강기능식품 허가 여부(C003)도 대조합니다.
+    표시: ❌ 법 기준상 금지 유형과 같은 표현 / ⚠️ 금지 유형·협회 불가 사례와 비슷 / ✅ 공식 인정 기능성과 일치 / ℹ️ 참고.
+    source_url·collected_at 은 웹에서 가져온 광고일 때 원문 주소와 수집 시각을 적어 결과에 함께 표시합니다.
+    ⚠️ 법 위반 판정이 아니라 확인이 필요한 표현을 찾아 주는 참고 기능입니다. 결과 끝의 ```json 블록은 카드용 데이터입니다.
     ※ 결과를 전달할 때 도구 결과에 없는 일반 지식·추정을 덧붙이지 말고, '해야 합니다' 같은 단정 대신 도구가 낸 판정 범위 안에서만 말하세요."""
     claims = _split_ad(ad_text)
     if not claims:
         return "광고 문구를 붙여 넣어 주세요. (예: '루테인 20mg 함유, 눈 건강에 도움, 시력 회복 보장')"
-    claims = claims[:30]
+    truncated = len(claims) > 40
+    claims = claims[:40]
+    whole = "\n".join(claims)
 
     official_text, official_lines, amounts, official_name, problems = "", [], {}, "", []
-    mult = 1
+    mult, is_healthfood = 1, None
     if (product_name or "").strip():
         try:
             item, _ = pick_product(product_name)
             if not item:
-                problems.append(f"`{product_name}` 허가 정보를 찾지 못해 공식 기능성 대조는 생략합니다.")
+                is_healthfood = False
+                problems.append(f"`{product_name}`을(를) 건강기능식품 허가 목록(C003)에서 찾지 못했습니다. 제품명이 다르거나 일반식품일 수 있습니다.")
             else:
+                is_healthfood = True
                 official_name = item.get("PRDLST_NM", product_name)
                 detail = pick_detail(official_name) or {}
                 official_text = str(detail.get("PRIMARY_FNCLTY") or item.get("PRIMARY_FNCLTY") or "")
@@ -2682,31 +2761,40 @@ def check_ad_claims(ad_text: str, product_name: str = "") -> str:
         except ApiError as e:
             problems.append(f"허가 정보 조회 오류: {e}")
     off_keys, off_tokens = _function_keys(official_text), _tokens(official_text)
+    omega_missing = bool(re.search(r"오메가\s*-?\s*3|omega", whole, re.I)) and not re.search(r"EPA\s*(및|와|,)\s*DHA", whole, re.I)
+    trial_disclaim = "모든 사람에게 동일" in whole
 
-    results = []
+    results, omega_done = [], False
     for c in claims:
-        level, reasons = "info", []
-        for label, pat in _DISEASE_PATTERNS:
-            if re.search(pat, c):
-                level = "bad"
-                reasons.append(f"❌ {label}: 질병의 예방·치료로 읽힐 수 있음")
-        for label, pat in _EXAGGERATION_PATTERNS:
-            if re.search(pat, c):
-                if level != "bad":
-                    level = "warn"
-                reasons.append(f"⚠️ {label}")
-        if level != "bad" and official_text:
-            keys = _function_keys(c)
-            toks = _tokens(c)
-            if keys & off_keys or (toks & off_tokens):
-                shared = sorted((keys & off_keys) or (toks & off_tokens))[:3]
-                if level == "info":
-                    level = "ok"
-                reasons.append(f"✅ 공식 인정 기능성과 겹침({', '.join(shared)})")
-            elif keys:
-                if level == "info":
-                    level = "warn"
-                reasons.append(f"⚠️ 인정 기능성에 없는 기능 표현({', '.join(sorted(keys))})")
+        hits = _ad_rule_hits(c, whole)
+        data_notes = []                                  # (등급, 문구)
+        if _HEALTHFOOD_CLAIM_RE.search(c):
+            if is_healthfood is False:
+                hits.append({"group": LAW, "basis": "법 제8조①3호·별표1 3호", "label": "건강기능식품으로 오인될 수 있는 표현", "level": "warn",
+                             "match": _HEALTHFOOD_CLAIM_RE.search(c).group(0), "note": "허가 목록(C003)에서 제품을 찾지 못함"})
+            elif is_healthfood:
+                data_notes.append(("ok", "✅ 건강기능식품 허가 목록(C003)에서 확인된 제품"))
+        if omega_missing and not omega_done and re.search(r"오메가\s*-?\s*3|omega", c, re.I):
+            omega_done = True
+            hits.append({"group": KHFF, "basis": "심의기준 변경 공지(2025.6.11)", "label": "정식 원료명 'EPA 및 DHA 함유 유지' 표기 없음", "level": "ref",
+                         "match": "오메가3", "note": "광고 안에 정식 원료명이 명확히 있으면 허용"})
+        if _HUMAN_TRIAL_RE.search(c) and _NUMBER_CLAIM_RE.search(c) and not trial_disclaim:
+            hits.append({"group": KHFF, "basis": "공통심의기준 Ⅲ-2-가", "label": "인체시험 수치 인용 시 안내 문구 없음", "level": "ref",
+                         "match": _NUMBER_CLAIM_RE.search(c).group(0), "note": "'인체시험결과가 모든 사람에게 동일하게 적용되는 것은 아님' 병기 필요"})
+        keys = _function_keys_strict(c)
+        if "부스" in c:
+            keys.discard("피로")                       # '에너지 부스터'는 협회 허용 표현
+        if official_text and not any(h["level"] == "bad" for h in hits):
+            shared = (_function_keys(c) & off_keys) or (_tokens(c) & off_tokens)
+            if shared:
+                if _STRONG_CLAIM_RE.search(c) and "도움" not in c:
+                    hits.append({"group": LAW, "basis": "별표1 5호 아·자", "label": "인정 문구를 바꾸거나 단정한 표현", "level": "warn",
+                                 "match": _STRONG_CLAIM_RE.search(c).group(0), "note": "인정 문구는 '~에 도움을 줄 수 있음' 형태"})
+                else:
+                    data_notes.append(("ok", f"✅ 공식 인정 기능성과 일치({', '.join(sorted(shared)[:3])})"))
+            elif keys - off_keys:
+                hits.append({"group": LAW, "basis": "별표1 4호 나", "label": "인정받지 않은 기능성 표현", "level": "warn",
+                             "match": ", ".join(sorted(keys - off_keys)), "note": "이 제품의 공식 인정 기능성(I0030)에 없음"})
         if official_text and amounts:
             for m in _AD_AMOUNT_RE.finditer(c):
                 key = canon(m.group(1).strip())
@@ -2714,32 +2802,45 @@ def check_ad_claims(ad_text: str, product_name: str = "") -> str:
                     ad_mg = (_to_float(m.group(2)) or 0) * UNIT_TO_MG.get(m.group(3).lower(), 1.0)
                     label_mg = amounts[key][1]
                     ok = any(abs(ad_mg - ref) <= ref * 0.2 for ref in (label_mg, label_mg * mult) if ref)
-                    reasons.append(("✅" if ok else "⚠️") + f" 함량 표기 {m.group(2)}{m.group(3)}: 기준규격 1회 {fmt_auto(label_mg)} / 1일 {fmt_auto(label_mg * mult)}"
-                                   + ("와 비슷함" if ok else "와 다름"))
-                    if not ok and level in ("info", "ok"):
-                        level = "warn"
+                    txt = f"함량 표기 {m.group(2)}{m.group(3)}: 기준규격 1회 {fmt_auto(label_mg)} / 1일 {fmt_auto(label_mg * mult)}"
+                    if ok:
+                        data_notes.append(("ok", f"✅ {txt}와 비슷함"))
+                    else:
+                        hits.append({"group": LAW, "basis": "법 제8조①4호·별표1 4호 가", "label": "신고 함량과 다른 표기", "level": "warn",
+                                     "match": f"{m.group(2)}{m.group(3)}", "note": txt + "와 다름"})
+        level = max([h["level"] for h in hits] + [n[0] for n in data_notes] + ["info"], key=lambda x: _AD_LEVEL_ORDER[x])
+        reasons = [f"{_AD_LEVEL_MARK[h['level']]} [{h['group']}] {h['label']} — '{short(h['match'], 20)}' ({h['basis']})"
+                   + (f" · {h['note']}" if h["note"] else "") for h in sorted(hits, key=lambda h: -_AD_LEVEL_ORDER[h["level"]])]
+        reasons += [n[1] for n in data_notes]
         if not reasons:
-            ks = _function_keys(c)
-            reasons.append(f"ℹ️ 기능성 표현 감지({', '.join(sorted(ks))}) — 제품명을 함께 주면 공식 인정 기능성과 대조합니다" if (ks and not official_text)
-                           else "ℹ️ 기능성·질병·과장 표현이 감지되지 않음(판단 대상 아님)")
-        results.append({"text": c, "level": level, "reasons": reasons})
+            reasons.append(f"ℹ️ 기능성 표현 감지({', '.join(sorted(keys))}) — 제품명을 함께 주면 공식 인정 기능성과 대조합니다" if (keys and not official_text)
+                           else "ℹ️ 점검 대상 표현이 감지되지 않음")
+        results.append({"text": c, "level": "ref" if level == "info" else level, "reasons": reasons, "hits": hits})
 
-    icon = {"ok": "✅", "warn": "⚠️", "bad": "❌", "info": "ℹ️"}
-    cnt = {k: sum(1 for r in results if r["level"] == k) for k in icon}
+    cnt = {k: sum(1 for r in results if r["level"] == k) for k in ("bad", "warn", "ok", "ref")}
+    by_group = {g: sum(1 for r in results for h in r["hits"] if h["group"] == g and h["level"] in ("bad", "warn")) for g in (LAW, KHFF)}
     report = "### 📢 광고 팩트체크\n\n"
+    if source_url:
+        report += f"**원문:** {source_url}" + (f" (수집 {collected_at})" if collected_at else "") + "\n\n"
     if official_name:
-        report += f"**대조 제품:** {official_name}\n**공식 인정 기능성(I0030 주된기능성):**\n" + "".join(f"- {short(ln, 100)}\n" for ln in official_lines[:6]) + "\n"
-    elif not problems:
-        report += "제품명을 주지 않아 인정 기능성 대조는 하지 않고, 질병·과장 표현만 점검했습니다.\n\n"
-    report += f"**요약:** ❌ {cnt['bad']}건 · ⚠️ {cnt['warn']}건 · ✅ {cnt['ok']}건 · ℹ️ {cnt['info']}건\n\n"
+        report += f"**대조 제품:** {official_name} (건강기능식품 허가 목록 확인)\n**공식 인정 기능성(I0030 주된기능성):**\n" + "".join(f"- {short(ln, 100)}\n" for ln in official_lines[:6]) + "\n"
+    elif not product_name:
+        report += "제품명을 주지 않아 인정 기능성·함량 대조는 하지 않고, 법령·협회 기준의 표현만 점검했습니다.\n\n"
+    report += (f"**요약:** ❌ {cnt['bad']}문장 · ⚠️ {cnt['warn']}문장 · ✅ {cnt['ok']}문장 · ℹ️ {cnt['ref']}문장 "
+               f"(확인 필요 표현: 법 기준 {by_group[LAW]}건 · 협회 심의기준 {by_group[KHFF]}건)\n\n")
     for r in results:
-        mark = icon[r["level"]] + ("(일부 ✅)" if r["level"] in ("warn", "bad") and any(x.startswith("✅") for x in r["reasons"]) else "")
+        mark = _AD_LEVEL_MARK[r["level"]] + ("(일부 ✅)" if r["level"] in ("warn", "bad") and any(x.startswith("✅") for x in r["reasons"]) else "")
         report += f"- {mark} “{short(r['text'], 70)}”\n" + "".join(f"  - {x}\n" for x in r["reasons"])
+    if truncated:
+        report += "\n> ❗ 문장이 많아 앞 40문장만 점검했습니다.\n"
     if problems:
         report += "\n" + "".join(f"> ❗ {p}\n" for p in problems)
-    report += ("\n> 💡 법 위반 여부를 판정하는 기능이 아닙니다. 공식 인정 내용과 다르게 읽힐 수 있는 표현을 찾아 주는 참고 도구이며, 키워드 기반이라 놓치거나 "
-               "과하게 잡을 수 있습니다. 광고 표현의 적법성은 식약처·전문가에게 확인하세요.")
-    data = {"ad": {"product": official_name, "official": official_lines[:8], "claims": results, "counts": cnt}}
+    report += ("\n> 💡 법 위반 여부를 판정하는 기능이 아닙니다. [법]은 식품표시광고법 제8조·시행령 [별표 1]·식약처 고시, [협회]는 한국건강기능식품협회 "
+               "자율심의 기준(공통심의기준 2025.6)에 비춘 표시이며, 단어 기반이라 문맥에 따라 놓치거나 과하게 잡을 수 있습니다. "
+               "실제 적법성은 자율심의 또는 전문가 검토로 확인하세요.")
+    data = {"ad": {"product": official_name, "official": official_lines[:8], "source_url": source_url, "collected_at": collected_at,
+                   "claims": [{k: v for k, v in r.items() if k != "hits"} for r in results], "counts": {"bad": cnt["bad"], "warn": cnt["warn"], "ok": cnt["ok"], "info": cnt["ref"]},
+                   "by_basis": by_group}}
     return report + "\n\n```json\n" + json.dumps(data, ensure_ascii=False) + "\n```"
 
 
@@ -3010,7 +3111,4 @@ def recommend_by_function(keyword: str, sex: str = "", age: int = 0, current_int
 
 
 if __name__ == "__main__":
-    if os.environ.get("MCP_TRANSPORT", "stdio") == "http":      # 서버 배포용 (실제 배포는 server_http.py 사용 권장)
-        mcp.run(transport="http", host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
-    else:
-        mcp.run()
+    mcp.run()
